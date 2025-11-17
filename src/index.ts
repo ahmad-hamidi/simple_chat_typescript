@@ -230,41 +230,48 @@ app.get("/all-chat", async (req: Request, res: Response) => {
       });
     }
 
+    const uniqueRoomIds = new Set<string>();
+    
     const chatList = await Promise.all(
       chatsSnapshot.docs.map(async (doc) => {
-        const data = doc.data();
+        const roomIdCek = doc.ref.parent.parent?.id;
 
-        const senderId = String(data.sender_id);
-        const receiverId = String(data.receiver_id);
+        if (roomIdCek && !uniqueRoomIds.has(roomIdCek)) {
+          uniqueRoomIds.add(roomIdCek);
+          const data = doc.data();
 
-        const senderDoc = await db.collection("users")
-        .where("user_id", "==", Number(senderId))
-        .limit(1)
-        .get();
+          const senderId = String(data.sender_id);
+          const receiverId = String(data.receiver_id);
 
-        const senderName = senderDoc.empty ? null : senderDoc.docs[0].data().fullname;
-        
-        const receiverDoc = await db.collection("users")
-        .where("user_id", "==", Number(receiverId))
-        .limit(1)
-        .get();
+          const senderDoc = await db.collection("users")
+          .where("user_id", "==", Number(senderId))
+          .limit(1)
+          .get();
 
-        const receiverName = receiverDoc.empty ? null : receiverDoc.docs[0].data().fullname;
+          const senderName = senderDoc.empty ? null : senderDoc.docs[0].data().fullname;
+          
+          const receiverDoc = await db.collection("users")
+          .where("user_id", "==", Number(receiverId))
+          .limit(1)
+          .get();
 
-        const { sender_id, receiver_id, updatedAt, roomId, ...response } = data;
-        
-        return {
-          roomId: doc.ref.parent.parent?.id,
-          ...response,
-          senderName: senderName,
-          receiverName: receiverName,
-        };
+          const receiverName = receiverDoc.empty ? null : receiverDoc.docs[0].data().fullname;
+
+          const { sender_id, receiver_id, updatedAt, roomId, ...response } = data;
+          
+          return {
+            roomId: doc.ref.parent.parent?.id, 
+            ...response,
+            senderName: senderName,
+            receiverName: receiverName,
+          };
+        }
       })
     );
 
     res.status(200).json({
       message: "Chat list fetched successfully ",
-      chats: chatList,
+      chats: chatList.filter((c) => c != null),
     });
   } catch (error) {
     console.error("Error fetching all chat :", error);
@@ -334,6 +341,89 @@ app.get("/messages-by-user", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error fetching messages:", error);
     res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+app.get("/unique-room-list", async (req: Request, res: Response) => {
+  try {
+    const messagesSnapshot = await db
+      .collectionGroup("messages")
+      .get();
+
+    if (messagesSnapshot.empty) {
+      return res.status(200).json({
+        message: "No rooms found",
+        rooms: [],
+      });
+    }
+
+    const uniqueRoomIds = new Set<string>();
+    const roomList: any[] = [];
+
+    messagesSnapshot.forEach((doc) => {
+      const roomId = doc.ref.parent.parent?.id;
+
+      if (roomId && !uniqueRoomIds.has(roomId)) {
+        uniqueRoomIds.add(roomId);
+
+        roomList.push({
+          roomId: roomId,
+        });
+      }
+    });
+
+    res.status(200).json({
+      message: "Room list fetched successfully",
+      rooms: roomList,
+    });
+
+  } catch (error) {
+    console.error("Error fetching unique room list:", error);
+    res.status(500).json({
+      error: "Failed to fetch room list",
+    });
+  }
+});
+
+app.get("/messages", async (req: Request, res: Response) => {
+  try {
+    const roomId = req.query.room_id as string;
+
+    if (!roomId) {
+      return res
+        .status(400)
+        .json({ error: "room_id query parameter is required" });
+    }
+
+    const messagesSnapshot = await db
+      .collection("chats")
+      .doc(roomId)
+      .collection("messages")
+      .orderBy("timestamp", "asc") 
+      .get();
+
+    if (messagesSnapshot.empty) {
+      return res.status(200).json({
+        message: `No messages found for room ${roomId}`,
+        messages: [],
+      });
+    }
+
+    const messages = messagesSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json({
+      message: "Messages fetched successfully",
+      roomId,
+      messages,
+    });
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({
+      error: "Failed to fetch messages from Firestore",
+    });
   }
 });
 
