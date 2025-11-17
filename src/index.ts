@@ -274,6 +274,71 @@ app.get("/all-chat", async (req: Request, res: Response) => {
   }
 });
 
+app.get("/messages-by-user", async (req: Request, res: Response) => {
+  try {
+    const userId = req.query.user_id as string;
+
+    if (!userId) {
+      return res.status(400).json({ error: "user_id query parameter is required" });
+    }
+
+    // 1️⃣ Ambil semua room yang ada user ini (sender/receiver)
+    const roomsSnapshot = await db
+      .collection("chats")
+      .where("participants", "array-contains", Number(userId))
+      .get();
+
+    if (roomsSnapshot.empty) {
+      return res.status(200).json({
+        message: "No messages found for user " + userId,
+        messages: [],
+      });
+    }
+
+    const allMessages: any[] = [];
+
+    // 2️⃣ Loop semua room dan ambil messages-nya
+    for (const roomDoc of roomsSnapshot.docs) {
+      const roomId = roomDoc.id;
+
+      const messagesSnapshot = await db
+        .collection("chats")
+        .doc(roomId)
+        .collection("messages")
+        .orderBy("timestamp", "desc")
+        .get();
+
+      messagesSnapshot.forEach((msgDoc) => {
+        const msg = msgDoc.data();
+
+        // 3️⃣ Filter hanya message milik user ini
+        if (String(msg.sender_id) === userId || String(msg.receiver_id) === userId) {
+          allMessages.push({
+            roomId,
+            id: msgDoc.id,
+            ...msg,
+          });
+        }
+      });
+    }
+
+    // 4️⃣ Urutkan semua pesan berdasarkan waktu
+    allMessages.sort((a, b) => b.timestamp - a.timestamp);
+
+    res.status(200).json({
+      message: "Messages fetched successfully",
+      total: allMessages.length,
+      messages: allMessages,
+    });
+
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+
+
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
