@@ -289,7 +289,7 @@ app.get("/messages-by-user", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "user_id query parameter is required" });
     }
 
-    // 1️⃣ Ambil semua room yang ada user ini (sender/receiver)
+
     const roomsSnapshot = await db
       .collection("chats")
       .where("participants", "array-contains", Number(userId))
@@ -304,7 +304,7 @@ app.get("/messages-by-user", async (req: Request, res: Response) => {
 
     const allMessages: any[] = [];
 
-    // 2️⃣ Loop semua room dan ambil messages-nya
+
     for (const roomDoc of roomsSnapshot.docs) {
       const roomId = roomDoc.id;
 
@@ -329,7 +329,7 @@ app.get("/messages-by-user", async (req: Request, res: Response) => {
       });
     }
 
-    // 4️⃣ Urutkan semua pesan berdasarkan waktu
+
     allMessages.sort((a, b) => b.timestamp - a.timestamp);
 
     res.status(200).json({
@@ -423,6 +423,108 @@ app.get("/messages", async (req: Request, res: Response) => {
     console.error("Error fetching messages:", error);
     res.status(500).json({
       error: "Failed to fetch messages from Firestore",
+    });
+  }
+});
+
+app.get("/all-user-chat-latest", async (req: Request, res: Response) => {
+  try {
+    const usersSnapshot = await db.collection("users").get();
+
+    const users = usersSnapshot.docs.map((doc) => ({
+      docId: doc.id,
+      ...doc.data(),
+    }));
+
+    const result = [];
+
+    for (const user of users) {
+      const a = user as any;
+      const userId = a.user_id;
+      const fullname = a.fullname;
+
+      const roomSnapshot = await db
+        .collection("chats")
+        .where("participants", "array-contains", userId)
+        .orderBy("updatedAt", "desc")
+        .limit(1)
+        .get();
+
+      if (roomSnapshot.empty) {
+        result.push({
+          ...user,
+          latestChat: null,
+        });
+        continue;
+      }
+
+      const roomDoc = roomSnapshot.docs[0];
+      const roomId = roomDoc.id;
+      const roomData = roomDoc.data() as any;
+
+      const msgSnapshot = await db
+        .collection("chats")
+        .doc(roomId)
+        .collection("messages")
+        .where('sender_id', '==', userId)
+        .orderBy("timestamp", "desc")
+        .limit(1)
+        .get();
+
+      if (msgSnapshot.empty) {
+        result.push({
+          ...user,
+          latestChat: null,
+        });
+        continue;
+      }
+
+      const msg = msgSnapshot.docs[0].data() as any;
+
+      const senderSnap = await db
+        .collection("users")
+        .where("user_id", "==", Number(msg.sender_id))
+        .limit(1)
+        .get();
+
+      const receiverSnap = await db
+        .collection("users")
+        .where("user_id", "==", Number(msg.receiver_id))
+        .limit(1)
+        .get();
+
+      const senderName = senderSnap.empty
+        ? null
+        : senderSnap.docs[0].data().fullname;
+
+      const receiverName = receiverSnap.empty
+        ? null
+        : receiverSnap.docs[0].data().fullname;
+
+        //const senderName = fullname;
+
+      result.push({
+        ...user,
+        latestChat: {
+          roomId,
+          message: msg.message,
+          timestamp: msg.timestamp,
+          senderId: msg.sender_id,
+          receiverId: msg.receiver_id,
+          fullname,
+          user_id: userId,
+        },
+      });
+    }
+
+    res.status(200).json({
+      message: "All users with latest chat fetched successfully",
+      users: result,
+    });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({
+      error: "Failed to fetch users with latest chat",
     });
   }
 });
